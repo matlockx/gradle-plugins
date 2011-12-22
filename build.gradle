@@ -1,0 +1,107 @@
+group = 'de.matlockx'
+version = '1.0.0-SNAPSHOT'
+allprojects {
+
+    apply plugin: 'idea'
+    repositories {
+        mavenCentral()
+    }
+
+    apply plugin: 'eclipse'
+
+    eclipse {
+
+        project {
+            natures = [
+                'com.springsource.sts.gradle.core.nature'
+            ]
+        }
+        classpath{
+            //customizing the classes output directory:
+            defaultOutputDir = file('build-eclipse')
+        }
+    }
+    libraryVersions = [
+        junit: '4.8.1', mockito: '1.8.5', log4j: '1.2.16', log4jExtras: '1.1'
+    ]
+}
+
+subprojects{
+
+    version =  parent.version
+    group = parent.group
+
+    sourceCompatibility = JavaVersion.VERSION_1_6
+    targetCompatibility = JavaVersion.VERSION_1_6
+
+    [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+    // we reset the last modified date of all test result files
+    // for incremental builds which don't run the tests when no
+    // chage has been made. otherwise jenkins will throw an exception then caused by
+    // old test result files
+    task jenkinsTest{
+        inputs.files test.outputs.files
+        doLast{
+            def timestamp = System.currentTimeMillis()
+            test.testResultsDir.eachFile { it.lastModified = timestamp }
+        }
+    }
+
+    build.dependsOn(jenkinsTest)
+}
+
+
+subprojects.each { project.evaluationDependsOn(it.name) }
+
+// aggretgate all javadoc files into one folder at top-level directory
+task aggregateJavadoc(type: Javadoc) {
+    source subprojects.collect { project ->
+        project.sourceSets.main.allJava
+    }
+    destinationDir = new File(buildDir, 'javadoc')
+    // Might need a classpath
+    classpath = files(subprojects.collect { project ->
+        project.sourceSets.main.compileClasspath
+    })
+}
+
+
+subprojects.each { project.tasks.build.dependsOn(it.tasks.build) }
+
+task drawTaskGraph <<{
+    File dotFile = new File("$buildDir/tasks.dot")
+    if(dotFile.exists())
+    dotFile.delete()
+    dotFile << "digraph $project.name {"
+    dotFile << "node [color=lightblue2, style=filled];"
+    String line = ""
+    Set<String> lines = []
+    subprojects.each { sub ->
+        line = "\"" +project.name + "\" -> \"" + sub.name+"\";\n"
+        lines.add(line)
+    }
+    allprojects.each { proj ->
+        proj.tasks.each{ Task t ->
+            if(t.getTaskDependencies() != null && t.getTaskDependencies().getDependencies(t) != null && t.getTaskDependencies().getDependencies(t).size() > 0){
+
+                line = "\"" +t.getProject().name + "\" -> \"" + t.getProject().name + ":" + t.name+"\";\n"
+                lines.add(line)
+                t.getTaskDependencies().getDependencies(t).each{ d ->
+                    line = "\"" + t.getProject().name + ":" + t.name + "\"" + " -> \""  + d.getProject().name + ":" + d.name +"\";\n"
+                    lines.add(line)
+                }
+            }
+            else{
+                line = "\"" +t.getProject().name + "\" -> \"" + t.getProject().name + ":" + t.name+"\";\n"
+                lines.add(line)
+            }
+
+        }
+    }
+    lines.each{ l ->
+        dotFile << l
+    }
+    dotFile << "}"
+    println dotFile
+}
